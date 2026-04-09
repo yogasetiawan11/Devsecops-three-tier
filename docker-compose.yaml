@@ -1,0 +1,62 @@
+services:
+  database:
+    image: postgres
+    container_name: db-jerney0
+    restart: unless-stopped
+    env:
+      POSTGRES_USER:
+      POSTGRES_PASSWORD: 
+      POSTGRES_DB: db-jerney0
+    port: 
+      - "5432:5432"
+  volumes:
+    - pgdata:/var/lib/postgresql/data
+  # Security : read only root filesystem
+  tmpfs:
+    - /tmp
+    - /run
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend-jerney0 
+    restart: unless-stopped
+    env:
+      PORT: "5000"
+      DB_USER:
+      DB_PASSWORD:
+      DB_HOST: "db"
+      DB_PORT: "5432" 
+      DB_NAME: db-jerney0
+    expose:
+      - "5000"
+
+    depends-on:
+      db:
+        - condition: service_healthy
+
+    security_opt:
+      - no-new-priviledge:true
+    read_only: true
+    tmpfs:
+      - /var
+      - /tmp
+
+  front-end:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend-jerney0
+    restart: unless-stopped 
+    ports:
+      - "80:8080"
+    depends_on:
+      backend:
+        - condition: service_healthy
+      security_opt:
+        - no-new-priviledge:true
+        
+volume:
+  pgdata:
+    driver: local

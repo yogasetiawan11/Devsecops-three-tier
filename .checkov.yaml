@@ -1,0 +1,11 @@
+compact:
+  - CKV_AWS_39   # Public access to EKS endpoint (needed for kubectl)
+  - CKV_AWS_58   # EKS public endpoint (intentional for dev access)
+soft-fail: false
+framework:
+  - terraform
+directory:
+  - terraform
+
+
+# This configuration allows Checkov to run against the Terraform code in the 'terraform' directory, while ignoring specific checks related to EKS public access. The 'soft-fail' setting is set to false, meaning that any failed checks will cause the scan to fail.

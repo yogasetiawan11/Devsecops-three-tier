@@ -4,7 +4,7 @@ services:
     container_name: jerney-database
     restart: unless-stopped
     environment:
-      POSTGRES_USER: jerney-user
+      POSTGRES_USER: jerney_user
       POSTGRES_PASSWORD: jerney-password-12212
       POSTGRES_DB: jerney_db
     ports:

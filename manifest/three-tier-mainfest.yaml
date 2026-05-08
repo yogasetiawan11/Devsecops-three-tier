@@ -92,7 +92,7 @@ metadata:
           effect: "NoExecute"
           tolerationSeconds: 300
       containers: 
-        - image: postgres:16
+        - image: postgres:16-alpine
           ports:
             - containerPort: 5432:5432
               protocol: tcp
@@ -193,7 +193,7 @@ spec:
               echo "DB is ready!"
       containers:
         - name: backend
-          image: ghcr.io/yogasetiawan/Jerney/jerney-backend:75da1da
+          image: yogas4/web-app-backend:latest
           ports:
             - containerPort: 5000
               protocol: TCP
@@ -300,7 +300,7 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: frontend
-          image: ghcr.io/yogasetiawan/Jerney/jerney-frontend:75da1da
+          image: yogas4/web-app-frontend:v1.2
           ports:
             - containerPort: 8080
               protocol: TCP

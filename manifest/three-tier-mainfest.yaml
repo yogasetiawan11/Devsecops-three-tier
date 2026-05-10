@@ -193,7 +193,7 @@ spec:
               echo "DB is ready!"
       containers:
         - name: backend
-          image: yogas4/web-app-backend:latest
+          image: ghcr.io/yogasetiawan11/web-app-backend:v1.2
           ports:
             - containerPort: 5000
               protocol: TCP
@@ -300,7 +300,7 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: frontend
-          image: yogas4/web-app-frontend:v1.2
+          image: ghcr.io/yogasetiawan11/web-app-frontend:v1.2
           ports:
             - containerPort: 8080
               protocol: TCP

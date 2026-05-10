@@ -1,29 +1,24 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: three-tier-app
-  version: v1
-  description: Namespace for the three-tier application
+  name: app
   labels:
-    app.kubernetes.io/part-of: three-tier-app
+    app.kubernetes.io/part-of: app
   
 ---
-# In production, use External Secrets Operator or Sealed Secrets.
-
-apiVersion: v1
-kind: Secret
-metadata:
-  name: db-credentials
-  namespace: three-tier-app
-  labels:
-    app.kubernetes.io/part-of: three-tier-app
-
     # ---- Database Secret ----
 # In production, use External Secrets Operator or Sealed Secrets.
 # This is base64 encoded for demo purposes.
 # echo -n 'yogaw' | base64
 # echo -n 'YWluZy1tYWNhbi1rdW1iYW5nMDkwMDk5MDk5OTA5Cg==' | base64
 # echo -n 'user-db' | base64 
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: app
+  labels:
+    app.kubernetes.io/part-of: app
 type: Opaque
 data:
   POSTGRES_USER: eW9nYXdzZXRpYXdhbjM0MjM0Cg==
@@ -32,7 +27,7 @@ data:
 
 ---
 # Create An Ebs volume for the database data.
-apiVersion: v1
+apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: ebs-sc
@@ -49,9 +44,10 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: db-pvc
-  namespace: three-tier-app
+  namespace: app
   labels:
-    app.kubernetes.io/part-of: three-tier-app
+    app.kubernetes.io/part-of: app
+    app.kubernetes.io/component: database
   spec:
     accessModes:
       - ReadWriteOnce
@@ -64,40 +60,40 @@ metadata:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: db-deployment
-  namespace: three-tier-app
+  name: db-postgres
+  namespace: app
   labels:
-    app.kubernetes.io/part-of: three-tier-app
+    app.kubernetes.io/part-of: app
     app.kubernetes.io/component: database
-    app.kubernetes.io/name: web-app-db
+    app.kubernetes.io/name: db-postgres
   spec:
     replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: web-app-db
+      app.kubernetes.io/name: db-postgres
     strategy:
       type: Recreate
     template:
       metadata:
         labels:
-          app.kubernetes.io/part-of: three-tier-app
+          app.kubernetes.io/part-of: app
           app.kubernetes.io/component: database
-          app.kubernetes.io/name: web-app-db
+          app.kubernetes.io/name: db-postgres
       # Security: don't automount service account token (DB doesn't need K8s API)
     spec:
       automountServiceAccountToken: false
       tolerations:
-        - key: "karpenter.sh/distrupted"
+        - key: "karpenter.sh/disrupted"
           operator: "Exists"
-          effect: "NoExecute"
+          effect: "NoSchedule"
           tolerationSeconds: 300
       containers: 
         - image: postgres:16-alpine
           ports:
-            - containerPort: 5432:5432
+            - containerPort: 5432
               protocol: tcp
           envFrom:
-            secretKeyRef: db-credentials
+            secretRef: db-credentials
           volumeMounts:
             - name: db-storage
               mountPath: /var/lib/postgresql/data
@@ -107,77 +103,76 @@ metadata:
               cpu: "250m"
               memory: "512Mi"
             limits:
-              cpu: "1"
-              memory: "1Gi"
+              cpu: "500m"
+              memory: "512Mi"
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true  # Postgres needs write access
-            runAsNonRoot: true
+            readOnlyRootFilesystem: false  # Postgres needs write access
+            runAsNonRoot: false  # Postgres image runs as root by default
           livenessProbe:
             exec:
               command: ["pg_isready", "-U", "db-user", "-d", "db-demo"]
-            initialDelaySeconds: 10
-            periodSeconds: 5
+            initialDelaySeconds: 15
+            periodSeconds: 10
             timeoutSeconds: 5
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "db-user", "-d", "db-demo"]
             initialDelaySeconds: 5
             periodSeconds: 5
-            timeoutSeconds: 5
+            timeoutSeconds: 3
       volumes:
         - name: db-storage
           persistentVolumeClaim:
             claimName: db-pvc
 
 ---
+# ---- Database Service ----
 apiVersion: v1
 kind: Service
 metadata:
-  name: my-service
-  namespace: three-tier-app
+  name: db-postgres
+  namespace: app
   labels:
-    app.kubernetes.io/part-of: three-tier-app
+    app.kubernetes.io/part-of: app
     app.kubernetes.io/component: database
-    app.kubernetes.io/name: web-app-db
+    app.kubernetes.io/name: db-postgres
 spec:
   selector:
-    app.kubernetes.io/name: web-app-db
+    app.kubernetes.io/name: db-postgres
   ports:
-  - protocol: TCP
-    port: 5432
-    targetPort: 5432            
-
+    - port: 5432
+      targetPort: 5432            
+      protocol: TCP
 ---
 
 # --------Backend deployment-------------
 apiVersion: v1
 kind: Deployment
 metadata:
-  name: backend-deployment
-  namespace: three-tier-app
+  name: backend-app
+  namespace: app
   labels:
-    app.kubernetes.io/part-of: three-tier-app
+    app.kubernetes.io/part-of: app
     app.kubernetes.io/component: backend
-    app.kubernetes.io/name: web-app-backend
+    app.kubernetes.io/name: backend-app
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app.kubernetes.io/name: web-app-backend
+      app.kubernetes.io/name: backend-app
   template:
     metadata:
       labels:
-        app.kubernetes.io/part-of: three-tier-app
+        app.kubernetes.io/part-of: app
         app.kubernetes.io/component: backend
-        app.kubernetes.io/name: web-app-backend
+        app.kubernetes.io/name: backend-app
     spec:
       automountServiceAccountToken: false
       tolerations:
         - key: "karpenter.sh/distrupted"
           operator: "Exists"
-          effect: "NoExecute"
-          tolerationSeconds: 300
+          effect: "NoSchedule"
       initContainers:
         - name: wait-for-db
           image: busybox:1.36
@@ -185,15 +180,15 @@ spec:
             - sh
             - -c
             - |
-              echo "Waiting for web-app-db:5432..."
-              until nc -z web-app-db 5432; do
-                echo "DB not ready, retrying in 3s..."
+              echo "Waiting for db-postgres:5432..."
+              until nc -z db-postgres 5432; do
+                echo "DB is not ready, retrying in 3s..."
                 sleep 3
               done
               echo "DB is ready!"
       containers:
         - name: backend
-          image: ghcr.io/yogasetiawan11/web-app-backend:v1.2
+          image: ghcr.io/yogasetiawan11/backend-jerney:v1.2
           ports:
             - containerPort: 5000
               protocol: TCP
@@ -201,7 +196,7 @@ spec:
             - name: PORT
               value: "5000"
             - name: DB_HOST
-              value: "web-app-db"
+              value: "db-postgres"
             - name: DB_PORT
               value: "5432"
             - name: DB_USER
@@ -255,16 +250,16 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: backend-deployment
-  namespace: three-tier-app
+  name: backend-app
+  namespace: app
   labels:
-    app.kubernetes.io/name: web-app-backend
-    app.kubernetes.io/part-of: three-tier-app
+    app.kubernetes.io/name: backend-app
+    app.kubernetes.io/part-of: app
     app.kubernetes.io/component: backend
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/name: web-app-backend
+    app.kubernetes.io/name: backend-app
   ports:
     - port: 5000
       targetPort: 5000
@@ -275,22 +270,22 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: web-app-frontend
-  namespace: three-tier-app
+  name: frontend-app
+  namespace: app
   labels:
-    app.kubernetes.io/name: web-app-frontend
-    app.kubernetes.io/part-of: three-tier-app
+    app.kubernetes.io/name: frontend-app
+    app.kubernetes.io/part-of: app
     app.kubernetes.io/component: frontend
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app.kubernetes.io/name: web-app-frontend
+      app.kubernetes.io/name: frontend-app
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: web-app-frontend
-        app.kubernetes.io/part-of: three-tier-app
+        app.kubernetes.io/name: frontend-app
+        app.kubernetes.io/part-of: app
         app.kubernetes.io/component: frontend
     spec:
       automountServiceAccountToken: false
@@ -300,7 +295,7 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: frontend
-          image: ghcr.io/yogasetiawan11/web-app-frontend:v1.2
+          image: ghcr.io/yogasetiawan11/frontend-jerney:v1.2
           ports:
             - containerPort: 8080
               protocol: TCP
@@ -336,16 +331,16 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: frontend-deployment
-  namespace: three-tier-app
+  name: frontend-app
+  namespace: app
   labels:
-    app.kubernetes.io/name: web-app-frontend
-    app.kubernetes.io/part-of: three-tier-app
+    app.kubernetes.io/name: frontend-app
+    app.kubernetes.io/part-of: app
     app.kubernetes.io/component: frontend
 spec:
-  type: NodePort
+  type: NodePort  # Expose frontend to outside cluster with port forward 
   selector:
-    app.kubernetes.io/name: web-app-frontend
+    app.kubernetes.io/name: frontend-app
   ports:
     - port: 80
       targetPort: 8080
@@ -355,19 +350,42 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: BE-allow-FE-only
-  namespace: three-tier-app
+  name: backend-db-only
+  namespace: app
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: web-app-backend
+      app.kubernetes.io/name: db-postgres
   policyTypes:
     - Ingress
   ingress:
     - from:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: web-app-frontend
+              app.kubernetes.io/name: backend-app
+      ports:
+        - port: 5432
+          protocol: TCP
+
+---
+# ---- Network Policy Backend should allow traffic from Frontend only ----
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-frontend-only
+  namespace: app
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: backend-app
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: frontend-app
       ports:
         - port: 5000
           protocol: TCP
+

@@ -26,15 +26,22 @@ data:
   POSTGRES_DB: ZGItZGVtbwo=
 
 ---
-# Create An Ebs volume for the database data.
+# Structure config to Create An Ebs volume for the database in eks.
+#apiVersion: storage.k8s.io/v1
+#kind: StorageClass
+#metadata:
+#  name: standard
+#  provisioner: rancher.io/local-path
+#reclaimPolicy: Retain
+#volumeBindingMode: WaitForFirstConsumer
+#allowVolumeExpansion: true
+
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: ebs-sc
-  provisioner: standard
-reclaimPolicy: Retain
+  name: standard
+provisioner: rancher.io/local-path # indicates that this StorageClass does not support automatic provisioning
 volumeBindingMode: WaitForFirstConsumer
-allowVolumeExpansion: true
 
 ---
 apiVersion: v1
@@ -45,13 +52,13 @@ metadata:
   labels:
     app.kubernetes.io/part-of: app
     app.kubernetes.io/component: database
-  spec:
-    accessModes:
-      - ReadWriteOnce
-    storageClassName: ebs-sc
-    resources:
-      requests:
-        storage: 10Gi
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 8Gi
 
 ---
 apiVersion: apps/v1
@@ -144,7 +151,7 @@ spec:
 ---
 
 # --------Backend deployment-------------
-apiVersion: v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: backend-app
@@ -172,7 +179,7 @@ spec:
           effect: "NoSchedule"
       initContainers:
         - name: wait-for-db
-          image: busybox:1.36
+          image: busybox:1.37.0-uclibc
           command:
             - sh
             - -c
@@ -342,6 +349,39 @@ spec:
     - port: 80
       targetPort: 8080
       protocol: TCP
+---
+---
+# 1. Create a ConfigMap for your clean Nginx configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-nginx-config
+  namespace: app
+data:
+  default.conf: |
+    server {
+        listen 8080; # Changed to match your containerPort/Probes
+        server_name _;
+
+        root /var/www/jerney/frontend/dist;
+        index index.html;
+
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        # Point proxy_pass to the actual K8s Service name: backend-app
+        location /api/ {
+            proxy_pass http://backend-app:5000; 
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_cache_bypass $http_upgrade;
+        }
+    }
 ---
 # ---- Network Policy Backend should allow traffic from Frontend only ----
 apiVersion: networking.k8s.io/v1

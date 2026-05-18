@@ -21,8 +21,8 @@ metadata:
     app.kubernetes.io/part-of: app
 type: Opaque
 data:
-  POSTGRES_USER: eW9nYXdzZXRpYXdhbjM0MjM0Cg==
-  POSTGRES_PASSWORD: YWluZy1tYWNhbi1rdW1iYW5nMDkwMDk5MDk5OTA5Cg==
+  POSTGRES_USER: eW9nYXdzZXRpYXdhbjM0MjM0
+  POSTGRES_PASSWORD: YWluZy1tYWNhbi1rdW1iYW5nMDkwMDk5MDk5OTA5
   POSTGRES_DB: ZGItZGVtbwo=
 
 ---
@@ -115,7 +115,7 @@ metadata:
             runAsNonRoot: false  # Postgres image runs as root by default
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "db-user", "-d", "db-demo"]
+              command: ["pg_isready", "-U", "yogasetiawan34234", "-d", "db-demo"]
             initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 5
@@ -299,7 +299,7 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: frontend
-          image: ghcr.io/yogasetiawan11/frontend-jerney:v1.2
+          image: ghcr.io/yogasetiawan11/frontend-jerney:v1.2.1
           ports:
             - containerPort: 8080
               protocol: TCP

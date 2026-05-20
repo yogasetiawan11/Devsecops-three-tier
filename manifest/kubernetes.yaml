@@ -41,7 +41,10 @@ kind: StorageClass
 metadata:
   name: standard
 provisioner: rancher.io/local-path # indicates that this StorageClass does not support automatic provisioning
+reclaimPolicy: Retain
 volumeBindingMode: WaitForFirstConsumer
+parameters:
+  guaranteedReadWriteLatency: "true"
 
 ---
 apiVersion: v1
@@ -52,6 +55,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: app
     app.kubernetes.io/component: database
+    app.kubernetes.io/name: db-postgres
 spec:
   accessModes:
     - ReadWriteOnce
@@ -70,19 +74,19 @@ metadata:
     app.kubernetes.io/part-of: app
     app.kubernetes.io/component: database
     app.kubernetes.io/name: db-postgres
-  spec:
-    replicas: 1
+spec:
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: db-postgres
-    strategy:
-      type: Recreate
-    template:
-      metadata:
-        labels:
-          app.kubernetes.io/part-of: app
-          app.kubernetes.io/component: database
-          app.kubernetes.io/name: db-postgres
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: app
+        app.kubernetes.io/component: database
+        app.kubernetes.io/name: db-postgres
       # Security: don't automount service account token (DB doesn't need K8s API)
     spec:
       automountServiceAccountToken: false
@@ -91,13 +95,15 @@ metadata:
           operator: "Exists"
           effect: "NoSchedule"
           tolerationSeconds: 300
-      containers: 
-        - image: postgres:16-alpine
+      containers:
+        - name: postgres 
+          image: postgres:16-alpine
           ports:
             - containerPort: 5432
               protocol: tcp
           envFrom:
-            secretRef: db-credentials
+            - secretRef: 
+                name: db-credentials
           volumeMounts:
             - name: db-storage
               mountPath: /var/lib/postgresql/data
@@ -121,7 +127,7 @@ metadata:
             timeoutSeconds: 5
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "db-user", "-d", "db-demo"]
+              command: ["pg_isready", "-U", "yogasetiawan34234", "-d", "db-demo"]
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3

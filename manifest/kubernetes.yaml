@@ -23,8 +23,7 @@ type: Opaque
 data:
   POSTGRES_USER: eW9nYXdzZXRpYXdhbjM0MjM0
   POSTGRES_PASSWORD: YWluZy1tYWNhbi1rdW1iYW5nMDkwMDk5MDk5OTA5
-  POSTGRES_DB: ZGItZGVtbwo=
-
+  POSTGRES_DB: ZGItZGVtbw==
 ---
 # Structure config to Create An Ebs volume for the database in eks.
 #apiVersion: storage.k8s.io/v1
@@ -75,7 +74,7 @@ metadata:
     app.kubernetes.io/component: database
     app.kubernetes.io/name: db-postgres
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: db-postgres
@@ -91,16 +90,16 @@ spec:
     spec:
       automountServiceAccountToken: false
       tolerations:
-        - key: "karpenter.sh/disrupted"
+        - key: "node.kubernetes.io/not-ready"
           operator: "Exists"
-          effect: "NoSchedule"
+          effect: "NoExecute"
           tolerationSeconds: 300
       containers:
         - name: postgres 
           image: postgres:16-alpine
           ports:
             - containerPort: 5432
-              protocol: tcp
+              protocol: TCP
           envFrom:
             - secretRef: 
                 name: db-credentials
@@ -352,42 +351,9 @@ spec:
   selector:
     app.kubernetes.io/name: frontend-app
   ports:
-    - port: 80
+    - port: 8080
       targetPort: 8080
       protocol: TCP
----
----
-# 1. Create a ConfigMap for your clean Nginx configuration
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: frontend-nginx-config
-  namespace: app
-data:
-  default.conf: |
-    server {
-        listen 8080; # Changed to match your containerPort/Probes
-        server_name _;
-
-        root /var/www/jerney/frontend/dist;
-        index index.html;
-
-        location / {
-            try_files $uri $uri/ /index.html;
-        }
-
-        # Point proxy_pass to the actual K8s Service name: backend-app
-        location /api/ {
-            proxy_pass http://backend-app:5000; 
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection 'upgrade';
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_cache_bypass $http_upgrade;
-        }
-    }
 ---
 # ---- Network Policy Backend should allow traffic from Frontend only ----
 apiVersion: networking.k8s.io/v1

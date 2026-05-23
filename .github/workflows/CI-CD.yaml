@@ -71,7 +71,7 @@ jobs:
         working-directory: ${{ matrix.component }}
 
       - name: Npm Audit
-        run: npm run sca --audit-level=high || true
+        run: npm audit --audit-level=high || true
         working-directory: ${{ matrix.component }}
 
   Static-analysis:
@@ -100,3 +100,17 @@ jobs:
       - name: Run static analysis
         run: npm run static-analysis || true
         working-directory: ${{ matrix.component }}
+
+  Dockerfile-lint:
+    name: Dockerfile Lint
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: Static-analysis
+    strategy:
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ matrix.component }}/Dockerfile

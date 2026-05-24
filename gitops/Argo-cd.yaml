@@ -1,0 +1,19 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd 
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/yogasetiawan11/Devsecops-three-tier'
+    targetRevision: main
+    path: gitops
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: staging
+  syncPolicy: {}
+  # syncPolicy:
+  #   automated:
+  #     prune: true
+  #     selfHeal: true

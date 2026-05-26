@@ -141,8 +141,14 @@ jobs:
         with:
           context: ./${{ matrix.component }}
           file: ./${{ matrix.component }}/Dockerfile
-          push: true
-          tags: ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:latest
+          push: ${{ github.event_name != 'pull_request' }} # Only push on non-PR events
+          tags: ${{steps.meta.outputs.tags}}
+          labels: ${{steps.meta.outputs.labels}}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # enable SBOM generation and provenance metadata for enhanced traceability and security insights
+          provenance: true
+          sbom: true
 
   Dockerfile-lint:
     name: Dockerfile Lint
@@ -157,3 +163,25 @@ jobs:
       - uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: ${{ matrix.component }}/Dockerfile
+
+  Image-scan:
+    name: Image Scan
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: Docker-build
+    strategy:
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - name : Checkout code
+        uses: actions/checkout@v4
+
+      - name: Trivy Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:${{ github.sha }}
+          format: table
+          output: trivy-image-scan.txt
+          exit-code: "0"
+          ignore-unfixed: true
+          severity: "CRITICAL,HIGH"

@@ -21,6 +21,9 @@ env:
   FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/web-app-frontend
 
 jobs:
+###################################################################
+# Step 1: Code Quality and Security Checks
+###################################################################
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -46,7 +49,12 @@ jobs:
       - name: Run lint
         run: npm run lint
         working-directory: ${{ matrix.component }}  
-        
+
+
+####################################################################
+# Step 2: Software Composition Analysis (SCA) and Static Code Analysis
+####################################################################
+
   sca:
     name: Software Composition Analysis
     runs-on: ubuntu-latest
@@ -73,6 +81,10 @@ jobs:
       - name: Npm Audit
         run: npm audit --audit-level=high || true
         working-directory: ${{ matrix.component }}
+
+####################################################################
+# Step 3: Static Code Analysis
+####################################################################
 
   Static-analysis:
     name: Static Code Analysis
@@ -101,6 +113,9 @@ jobs:
         run: npm run static-analysis || true
         working-directory: ${{ matrix.component }}
 
+#####################################################################
+# Step 4: Build Docker Images
+#####################################################################
 
   Docker-build:
     name: Docker Build 
@@ -150,19 +165,9 @@ jobs:
           provenance: true
           sbom: true
 
-  Dockerfile-lint:
-    name: Dockerfile Lint
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    needs: Static-analysis
-    strategy:
-      matrix:
-        component: [backend, frontend]
-    steps:
-      - uses: actions/checkout@v3
-      - uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: ${{ matrix.component }}/Dockerfile
+######################################################################
+# Step 5: Image Scanning with Trivy
+######################################################################  
 
   Image-scan:
     name: Image Scan
@@ -182,6 +187,101 @@ jobs:
           image-ref: ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:${{ github.sha }}
           format: table
           output: trivy-image-scan.txt
-          exit-code: "0"
+          exit-code: "1"
           ignore-unfixed: true
+          vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
+
+######################################################################
+# Step 6: Dockerfile Linting with Hadolint
+######################################################################
+
+  Dockerfile-lint:
+    name: Dockerfile Lint
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: Static-analysis
+    strategy:
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - name : Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ matrix.component }}/Dockerfile
+          failure-threshold: warning
+   
+######################################################################
+# Step 7: IaC Scanning with Checkov
+######################################################################
+
+  Iac-scan:
+    name: IaC Scan
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: Image-scan
+    steps:
+      - name : Checkout code
+        uses: actions/checkout@v4
+
+      - name: chekov IaC Scanner
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: ./terraform
+          framework: terraform
+          soft-fail: true
+          output-format: json
+          output-file-path: ./reports/checkov-iac-scan.json
+
+
+#######################################################################
+# Step 8: Deploy to Kubernetes Cluster (ArgoCD)
+#######################################################################
+
+  Deploy-to-kubernetes:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    needs: Iac-scan
+    if: github.event_name == 'push' # Only deploy on push events, not on pull requests
+    permissions:
+      contents: read
+    steps:
+      - name : Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: get short SHA for image tag
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Update Kubernetes manifests with new image tags
+        run: |
+          IMAGE_TAG=${{ steps.sha.outputs.short }}
+
+
+          # Find the line number of the backend container image
+          # (the image: line right after `- name: backend`)
+          BACKEND_LINE=$(awk '/- name: backend/{found=1} found && /image:/{print NR; exit}' k8s/jerney.yaml)
+          echo "Backend image at line: ${BACKEND_LINE}"
+          sed -i "${BACKEND_LINE}s|.*|          image: ${BACKEND_IMAGE}:${IMAGE_TAG}|" k8s/jerney.yaml
+
+          # Find the line number of the frontend container image
+          # (the image: line right after `- name: frontend`)
+          FRONTEND_LINE=$(awk '/- name: frontend/{found=1} found && /image:/{print NR; exit}' k8s/jerney.yaml)
+          echo "Frontend image at line: ${FRONTEND_LINE}"
+          sed -i "${FRONTEND_LINE}s|.*|          image: ${FRONTEND_IMAGE}:${IMAGE_TAG}|" k8s/jerney.yaml
+
+          echo "✅ Updated images to tag: ${IMAGE_TAG}"
+          grep -n "image:" manifest/kubernetes.yaml
+
+      - name: Commit and push manifest update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/jerney.yaml
+          git diff --cached --quiet || git commit -m "ci: update k8s images to ${{ steps.sha.outputs.short }} [skip ci]"
+          git push

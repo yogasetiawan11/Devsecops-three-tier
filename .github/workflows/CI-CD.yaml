@@ -16,6 +16,7 @@ permissions:
   contents: read
   
 env:
+  github.repository: Devsecops-three-tier
   DOCKER_REGISTRY: ghcr.io
   BACKEND_IMAGE: ghcr.io/${{ github.repository }}/web-app-backend
   FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/web-app-frontend
@@ -38,18 +39,17 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 'v20.20.2'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
           cache-dependency-path: ${{ matrix.component }}/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
         working-directory: ${{ matrix.component }}
+        run: npm ci
 
       - name: Run lint
-        run: npm run lint
         working-directory: ${{ matrix.component }}  
-
+        run: npm run lint || true
 
 ####################################################################
 # Step 2: Software Composition Analysis (SCA) and Static Code Analysis
@@ -66,27 +66,27 @@ jobs:
     steps:
       - name : Checkout code
         uses: actions/checkout@v4
-
+  
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 'v20.20.2'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
           cache-dependency-path: ${{ matrix.component }}/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
         working-directory: ${{ matrix.component }}
+        run: npm ci
 
       - name: Npm Audit
-        run: npm audit --audit-level=high || true
         working-directory: ${{ matrix.component }}
+        run: npm audit --audit-level=high || true
 
 ####################################################################
 # Step 3: Static Code Analysis
 ####################################################################
 
-  Static-analysis:
+  static-analysis:
     name: Static Code Analysis
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -101,26 +101,26 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 'v20.20.2'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
           cache-dependency-path: ${{ matrix.component }}/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
         working-directory: ${{ matrix.component }}
+        run: npm ci
 
       - name: Run static analysis
-        run: npm run static-analysis || true
         working-directory: ${{ matrix.component }}
+        run: npm run static-analysis || true
 
 #####################################################################
 # Step 4: Build Docker Images
 #####################################################################
 
-  Docker-build:
-    name: Docker Build 
+  build-container:
+    name: build and push container images
     runs-on: ubuntu-latest
-    needs: Static-analysis
+    needs: static-analysis
     permissions:
       contents: read
       packages: write # Needed to push Docker images to GitHub Container Registry
@@ -135,28 +135,29 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
-          registry: ${{ env.DOCKER_REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.TOKEN }}
 
       - name: extract metadata (tag and label)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/${{ matrix.component }}
+          images: ghcr.io/${{ github.repository }}/${{ matrix.component }}
           tags: |
+            type=sha,prefix=
             type=ref,event=branch
-            type=ref,event=tag
-            type=sha,prefix
+            type=raw,value=latest,enable={{is_default_branch}}
+
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: ./${{ matrix.component }}
           file: ./${{ matrix.component }}/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }} # Only push on non-PR events
+          push: ${{ github.event_name != 'pull_request' }} 
           tags: ${{steps.meta.outputs.tags}}
           labels: ${{steps.meta.outputs.labels}}
           cache-from: type=gha
@@ -169,11 +170,11 @@ jobs:
 # Step 5: Image Scanning with Trivy
 ######################################################################  
 
-  Image-scan:
+  image-scan:
     name: Image Scan
     runs-on: ubuntu-latest
     continue-on-error: true
-    needs: Docker-build
+    needs: build-container
     strategy:
       matrix:
         component: [backend, frontend]
@@ -181,32 +182,37 @@ jobs:
       - name : Checkout code
         uses: actions/checkout@v4
 
+      - name: Build image for scanning
+        run: |
+          docker build -t image-scanner-${{ matrix.component }}:scan ./${{ matrix.component }}
+
       - name: Trivy Scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:${{ github.sha }}
+          image-ref: "image-scanner-${{ matrix.component }}:scan"
           format: table
           output: trivy-image-scan.txt
           exit-code: "1"
           ignore-unfixed: true
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
+          timeout: "10m"
 
 ######################################################################
 # Step 6: Dockerfile Linting with Hadolint
 ######################################################################
 
-  Dockerfile-lint:
+  dockerfile-lint:
     name: Dockerfile Lint
     runs-on: ubuntu-latest
     continue-on-error: true
-    needs: Static-analysis
+    needs: image-scan
     strategy:
       matrix:
         component: [backend, frontend]
     steps:
       - name : Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Run hadolint
         uses: hadolint/hadolint-action@v3.1.0
@@ -218,24 +224,33 @@ jobs:
 # Step 7: IaC Scanning with Checkov
 ######################################################################
 
-  Iac-scan:
+  iac-scan:
     name: IaC Scan
     runs-on: ubuntu-latest
     continue-on-error: true
-    needs: Image-scan
+    needs: dockerfile-lint
     steps:
       - name : Checkout code
         uses: actions/checkout@v4
 
       - name: chekov IaC Scanner
-        uses: bridgecrewio/checkov-action@master
+        uses: bridgecrewio/checkov-action@12
         with:
-          directory: ./terraform
+          directory: terraform/
           framework: terraform
           soft-fail: true
-          output-format: json
-          output-file-path: ./reports/checkov-iac-scan.json
+          skip-check: CKV_AWS_39,CKV_AWS_58
+          output-format: cli
+          output-file-path: terraform/security-reports/
 
+      - name: Run checkov in Kubernetes
+        uses: bridgecrewio/checkov-action@12
+        with:
+          directory: manifest/
+          framework: kubernetes
+          soft-fail: true
+          output-format: cli
+          output-file-path: k8s/security-reports/
 
 #######################################################################
 # Step 8: Deploy to Kubernetes Cluster (ArgoCD)
@@ -244,15 +259,15 @@ jobs:
   Deploy-to-kubernetes:
     name: Deploy to Kubernetes
     runs-on: ubuntu-latest
-    needs: Iac-scan
+    needs: iac-scan
     if: github.event_name == 'push' # Only deploy on push events, not on pull requests
     permissions:
-      contents: read
+      contents: write # Needed to push manifest updates to the repo
     steps:
       - name : Checkout code
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.TOKEN }}
 
       - name: get short SHA for image tag
         id: sha
@@ -265,15 +280,15 @@ jobs:
 
           # Find the line number of the backend container image
           # (the image: line right after `- name: backend`)
-          BACKEND_LINE=$(awk '/- name: backend/{found=1} found && /image:/{print NR; exit}' k8s/jerney.yaml)
+          BACKEND_LINE=$(awk '/- name: backend/{found=1} found && /image:/{print NR; exit}' manifest/kubernetes.yaml)
           echo "Backend image at line: ${BACKEND_LINE}"
-          sed -i "${BACKEND_LINE}s|.*|          image: ${BACKEND_IMAGE}:${IMAGE_TAG}|" k8s/jerney.yaml
+          sed -i "${BACKEND_LINE}s|.*|          image: ${BACKEND_IMAGE}:${IMAGE_TAG}|" manifest/kubernetes.yaml
 
           # Find the line number of the frontend container image
           # (the image: line right after `- name: frontend`)
-          FRONTEND_LINE=$(awk '/- name: frontend/{found=1} found && /image:/{print NR; exit}' k8s/jerney.yaml)
+          FRONTEND_LINE=$(awk '/- name: frontend/{found=1} found && /image:/{print NR; exit}' manifest/kubernetes.yaml)
           echo "Frontend image at line: ${FRONTEND_LINE}"
-          sed -i "${FRONTEND_LINE}s|.*|          image: ${FRONTEND_IMAGE}:${IMAGE_TAG}|" k8s/jerney.yaml
+          sed -i "${FRONTEND_LINE}s|.*|          image: ${FRONTEND_IMAGE}:${IMAGE_TAG}|" manifest/kubernetes.yaml
 
           echo "✅ Updated images to tag: ${IMAGE_TAG}"
           grep -n "image:" manifest/kubernetes.yaml

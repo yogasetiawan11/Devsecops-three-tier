@@ -1,7 +1,7 @@
 # ---- Build stage ----
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY package.json package-lock.json* ./
+COPY package*.json package-lock.json* ./
 RUN npm ci && npm cache clean --force
 COPY . .
 RUN npm run build

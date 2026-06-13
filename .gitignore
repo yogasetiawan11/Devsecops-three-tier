@@ -13,4 +13,5 @@ coverage/
 .eslintcache
 *.tsbuildinfo
 *pre-commit-config.yaml
+.Infra.automation.yml
 # Ignore all files in the public directory except for index.html

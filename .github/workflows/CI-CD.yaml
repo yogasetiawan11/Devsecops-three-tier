@@ -182,6 +182,10 @@ jobs:
       - name : Checkout code
         uses: actions/checkout@v4
 
+      - name: Remove previous scan reports
+        run: |
+          rm -f trivy-image-scan.txt && rm -f trivy_envs.txt
+
       - name: Build image for scanning
         run: |
           docker build -t image-scanner-${{ matrix.component }}:scan ./${{ matrix.component }}
